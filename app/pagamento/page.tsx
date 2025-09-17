@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle, ArrowLeft, Baby, Heart, Star, MessageCircle, Copy, QrCode } from "lucide-react"
+import { CheckCircle, ArrowLeft, Baby, Heart, Star, MessageCircle, Copy, QrCode, Clock, RefreshCw } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 
@@ -21,12 +21,51 @@ export default function PagamentoPage() {
   const [pixCode, setPixCode] = useState("")
   const [qrCodeUrl, setQrCodeUrl] = useState("")
   const [showPayment, setShowPayment] = useState(false)
+  const [qrCodeExpired, setQrCodeExpired] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState(0)
+  const [qrCodeGeneratedAt, setQrCodeGeneratedAt] = useState<Date | null>(null)
 
   const numerosParam = searchParams.get("numeros")
   const totalParam = searchParams.get("total")
 
   const selectedNumbers = numerosParam ? numerosParam.split(",").map(Number) : []
   const total = totalParam ? Number.parseFloat(totalParam) : 0
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout
+
+    if (qrCodeGeneratedAt && !qrCodeExpired) {
+      interval = setInterval(() => {
+        const now = new Date()
+        const elapsed = now.getTime() - qrCodeGeneratedAt.getTime()
+        const oneHour = 60 * 60 * 1000 // 1 hora em millisegundos
+        const remaining = oneHour - elapsed
+
+        if (remaining <= 0) {
+          setQrCodeExpired(true)
+          setTimeRemaining(0)
+          setShowPayment(false)
+          toast({
+            title: "QR Code expirado",
+            description: "O tempo limite de 1 hora foi atingido. Gere um novo QR Code.",
+            variant: "destructive",
+          })
+        } else {
+          setTimeRemaining(remaining)
+        }
+      }, 1000)
+    }
+
+    return () => {
+      if (interval) clearInterval(interval)
+    }
+  }, [qrCodeGeneratedAt, qrCodeExpired, toast])
+
+  const formatTimeRemaining = (ms: number) => {
+    const minutes = Math.floor(ms / (1000 * 60))
+    const seconds = Math.floor((ms % (1000 * 60)) / 1000)
+    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+  }
 
   const generatePixCode = (value: number, customerName: string) => {
     const pixKey = "brennolisboa8812@gmail.com" // Chave PIX real fornecida pelo usuário
@@ -95,11 +134,18 @@ export default function PagamentoPage() {
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(pixCodeGenerated)}&format=png&margin=10`
     setQrCodeUrl(qrUrl)
     setShowPayment(true)
+    setQrCodeGeneratedAt(new Date())
+    setQrCodeExpired(false)
+    setTimeRemaining(60 * 60 * 1000) // 1 hora
 
     toast({
       title: "PIX gerado com sucesso!",
-      description: "Escaneie o QR Code ou copie o código PIX.",
+      description: "Escaneie o QR Code ou copie o código PIX. Válido por 1 hora.",
     })
+  }
+
+  const gerarNovoQrCode = () => {
+    gerarPagamentoPix()
   }
 
   const copyPixCode = () => {
@@ -347,7 +393,7 @@ Obrigado(a)! 🎉`
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Valor unitário:</span>
-                  <span>R$ 1,00</span>
+                  <span>R$ 5,00</span>
                 </div>
                 <div className="flex justify-between font-bold text-lg text-pink-800 mt-2">
                   <span>Total:</span>
@@ -397,32 +443,63 @@ Obrigado(a)! 🎉`
               <CardDescription>Pague instantaneamente via PIX</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {!showPayment ? (
+              {!showPayment || qrCodeExpired ? (
                 <>
-                  <div className="bg-gradient-to-br from-pink-50 to-rose-50 p-4 rounded-lg border border-pink-200">
-                    <h4 className="font-medium text-pink-800 mb-2 flex items-center justify-center gap-1">
-                      <Baby className="h-4 w-4" />
-                      Como funciona: 👶
-                    </h4>
-                    <ol className="text-sm text-pink-700 space-y-1">
-                      <li>1. 📝 Preencha seus dados ao lado</li>
-                      <li>2. 💳 Clique em "Gerar PIX"</li>
-                      <li>3. 📱 Escaneie o QR Code ou copie o código</li>
-                      <li>4. ✅ Pague no seu app bancário</li>
-                      <li>5. 🎉 Confirme o pagamento aqui</li>
-                    </ol>
-                  </div>
+                  {qrCodeExpired && (
+                    <div className="bg-gradient-to-br from-red-50 to-red-100 p-4 rounded-lg border border-red-200 text-center">
+                      <Clock className="h-8 w-8 text-red-600 mx-auto mb-2" />
+                      <h4 className="font-medium text-red-800 mb-2">⏰ Tempo Esgotado!</h4>
+                      <p className="text-red-700 text-sm mb-3">
+                        O QR Code expirou após 1 hora. Clique no botão abaixo para gerar um novo.
+                      </p>
+                      <Button
+                        onClick={gerarNovoQrCode}
+                        className="bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600"
+                        disabled={!customerName.trim() || !customerPhone.trim()}
+                      >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Gerar Novo QR Code
+                      </Button>
+                    </div>
+                  )}
 
-                  <Button
-                    onClick={gerarPagamentoPix}
-                    className="w-full bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 shadow-lg"
-                    disabled={!customerName.trim() || !customerPhone.trim()}
-                  >
-                    <QrCode className="h-4 w-4 mr-2" />💕 Gerar PIX - R$ {total.toFixed(2)}
-                  </Button>
+                  {!qrCodeExpired && (
+                    <>
+                      <div className="bg-gradient-to-br from-pink-50 to-rose-50 p-4 rounded-lg border border-pink-200">
+                        <h4 className="font-medium text-pink-800 mb-2 flex items-center justify-center gap-1">
+                          <Baby className="h-4 w-4" />
+                          Como funciona: 👶
+                        </h4>
+                        <ol className="text-sm text-pink-700 space-y-1">
+                          <li>1. 📝 Preencha seus dados ao lado</li>
+                          <li>2. 💳 Clique em "Gerar PIX"</li>
+                          <li>3. 📱 Escaneie o QR Code ou copie o código</li>
+                          <li>4. ✅ Pague no seu app bancário</li>
+                          <li>5. 🎉 Confirme o pagamento aqui</li>
+                        </ol>
+                      </div>
+
+                      <Button
+                        onClick={gerarPagamentoPix}
+                        className="w-full bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 shadow-lg"
+                        disabled={!customerName.trim() || !customerPhone.trim()}
+                      >
+                        <QrCode className="h-4 w-4 mr-2" />💕 Gerar PIX - R$ {total.toFixed(2)}
+                      </Button>
+                    </>
+                  )}
                 </>
               ) : (
                 <div className="space-y-4">
+                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-3 rounded-lg border border-blue-200 text-center">
+                    <div className="flex items-center justify-center gap-2 mb-1">
+                      <Clock className="h-4 w-4 text-blue-600" />
+                      <span className="text-blue-800 font-medium">Tempo restante:</span>
+                    </div>
+                    <div className="text-2xl font-bold text-blue-800">⏰ {formatTimeRemaining(timeRemaining)}</div>
+                    <p className="text-blue-600 text-xs mt-1">QR Code válido por 1 hora</p>
+                  </div>
+
                   {/* QR Code */}
                   <div className="text-center">
                     <div className="bg-white p-4 rounded-lg border-2 border-pink-200 inline-block">
