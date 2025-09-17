@@ -1,37 +1,77 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Baby, Gift, Users, Crown, Heart, Star } from "lucide-react"
+import { Baby, Gift, Users, Crown, Heart, Star, Wifi } from "lucide-react"
 import Link from "next/link"
 
 export default function RifaPage() {
   const [selectedNumbers, setSelectedNumbers] = useState<number[]>([])
   const [soldNumbers, setSoldNumbers] = useState<number[]>([1, 5, 12, 23, 45, 67, 89, 100, 134, 156, 178, 199])
   const [pendingNumbers, setPendingNumbers] = useState<number[]>([])
+  const [lastSync, setLastSync] = useState<string>("")
+  const [isOnline, setIsOnline] = useState(true)
 
   const totalNumbers = 200
   const pricePerNumber = 5.0
   const prize = 400
   const availableNumbers = totalNumbers - soldNumbers.length - pendingNumbers.length
 
-  useEffect(() => {
-    const savedData = localStorage.getItem("rifaData")
-    if (savedData) {
-      try {
+  const loadRifaData = useCallback(() => {
+    try {
+      const savedData = localStorage.getItem("rifaData")
+      if (savedData) {
         const data = JSON.parse(savedData)
-        if (data.soldNumbers) {
+        if (data.soldNumbers && Array.isArray(data.soldNumbers)) {
           setSoldNumbers(data.soldNumbers)
         }
-        if (data.pendingNumbers) {
+        if (data.pendingNumbers && Array.isArray(data.pendingNumbers)) {
           setPendingNumbers(data.pendingNumbers)
         }
-        console.log("[v0] Dados carregados da área admin:", data)
-      } catch (error) {
-        console.error("[v0] Erro ao carregar dados salvos:", error)
+        if (data.lastSaved) {
+          setLastSync(new Date(data.lastSaved).toLocaleTimeString())
+        }
+        console.log("[v0] Dados sincronizados:", data)
       }
+    } catch (error) {
+      console.error("[v0] Erro ao carregar dados:", error)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "rifaData" && e.newValue) {
+        console.log("[v0] Detectada mudança no localStorage, sincronizando...")
+        loadRifaData()
+      }
+    }
+
+    window.addEventListener("storage", handleStorageChange)
+    return () => window.removeEventListener("storage", handleStorageChange)
+  }, [loadRifaData])
+
+  useEffect(() => {
+    loadRifaData() // Carregamento inicial
+
+    const interval = setInterval(() => {
+      loadRifaData()
+    }, 5000) // Atualiza a cada 5 segundos
+
+    return () => clearInterval(interval)
+  }, [loadRifaData])
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+
+    return () => {
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
     }
   }, [])
 
@@ -64,6 +104,10 @@ export default function RifaPage() {
                 <p className="text-pink-600 flex items-center gap-1">
                   <Heart className="h-4 w-4" />
                   Rifa Beneficente
+                  <span className="ml-2 flex items-center gap-1 text-xs">
+                    <Wifi className={`h-3 w-3 ${isOnline ? "text-green-500" : "text-red-500"}`} />
+                    {lastSync && `Última sync: ${lastSync}`}
+                  </span>
                 </p>
               </div>
             </div>

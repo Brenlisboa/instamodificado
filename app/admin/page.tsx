@@ -1,13 +1,13 @@
 "use client"
 
 import type React from "react"
-
-import { useState, useEffect } from "react"
+import { useCallback, useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Wifi } from "lucide-react"
 import {
   Baby,
   Users,
@@ -123,6 +123,10 @@ export default function AdminPage() {
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
   const [searchTerm, setSearchTerm] = useState("")
+  const [lastSyncTime, setLastSyncTime] = useState<string>("")
+  const [drawnNumber, setDrawnNumber] = useState<number | null>(null)
+  const [isDrawing, setIsDrawing] = useState(false)
+  const [drawHistory, setDrawHistory] = useState<Array<{ number: number; date: string }>>([])
   const [purchases, setPurchases] = useState<Purchase[]>([
     {
       id: "1",
@@ -162,31 +166,51 @@ export default function AdminPage() {
     },
   ])
 
+  const loadSavedData = useCallback(() => {
+    try {
+      const savedPurchases = localStorage.getItem("rifaPurchases")
+      if (savedPurchases) {
+        const parsedPurchases = JSON.parse(savedPurchases)
+        setPurchases(parsedPurchases)
+        console.log("[v0] Dados carregados:", parsedPurchases.length, "compras")
+      }
+
+      const savedDrawnNumber = localStorage.getItem("rifaDrawnNumber")
+      if (savedDrawnNumber) {
+        setDrawnNumber(Number.parseInt(savedDrawnNumber))
+      }
+
+      const savedDrawHistory = localStorage.getItem("rifaDrawHistory")
+      if (savedDrawHistory) {
+        setDrawHistory(JSON.parse(savedDrawHistory))
+      }
+
+      const lastSaved = localStorage.getItem("rifaLastSaved")
+      if (lastSaved) {
+        setLastSyncTime(new Date(lastSaved).toLocaleString())
+      }
+    } catch (error) {
+      console.error("[v0] Erro ao carregar dados:", error)
+    }
+  }, [])
+
   useEffect(() => {
     const authStatus = localStorage.getItem("adminAuth")
     setIsAuthenticated(authStatus === "true")
 
-    // Carregar dados salvos
-    const savedPurchases = localStorage.getItem("rifaPurchases")
-    if (savedPurchases) {
-      try {
-        setPurchases(JSON.parse(savedPurchases))
-      } catch (error) {
-        console.error("Erro ao carregar dados salvos:", error)
-      }
-    }
-
+    loadSavedData()
     setIsLoading(false)
-  }, [])
+  }, [loadSavedData])
 
-  const handleLogout = () => {
-    localStorage.removeItem("adminAuth")
-    setIsAuthenticated(false)
-    toast({
-      title: "Logout realizado",
-      description: "Você foi desconectado da área administrativa.",
-    })
-  }
+  useEffect(() => {
+    if (purchases.length > 0) {
+      const timeoutId = setTimeout(() => {
+        saveAllChanges()
+      }, 2000) // Auto-save após 2 segundos de inatividade
+
+      return () => clearTimeout(timeoutId)
+    }
+  }, [purchases])
 
   const totalNumbers = 200
   const pricePerNumber = 5.0
@@ -227,26 +251,49 @@ export default function AdminPage() {
 
   const saveAllChanges = () => {
     try {
+      const timestamp = new Date().toISOString()
       const dataToSave = {
         purchases: purchases,
-        lastSaved: new Date().toISOString(),
+        lastSaved: timestamp,
         totalSold: totalSold,
         totalRevenue: totalRevenue,
         soldNumbers: soldNumbers,
         pendingNumbers: pendingNumbers,
+        drawnNumber: drawnNumber,
+        drawHistory: drawHistory,
+        version: Date.now(),
       }
 
-      // Salvar dados no localStorage
+      // Backup dos dados anteriores
+      const previousData = localStorage.getItem("rifaData")
+      if (previousData) {
+        localStorage.setItem("rifaDataBackup", previousData)
+      }
+
+      // Salvar novos dados
       localStorage.setItem("rifaPurchases", JSON.stringify(purchases))
       localStorage.setItem("rifaData", JSON.stringify(dataToSave))
-      localStorage.setItem("rifaLastSaved", new Date().toISOString())
+      localStorage.setItem("rifaLastSaved", timestamp)
+      if (drawnNumber !== null) {
+        localStorage.setItem("rifaDrawnNumber", drawnNumber.toString())
+      }
+      localStorage.setItem("rifaDrawHistory", JSON.stringify(drawHistory))
 
-      console.log("[v0] Dados salvos:", dataToSave)
-      console.log("[v0] Total de compras salvas:", purchases.length)
+      setLastSyncTime(new Date(timestamp).toLocaleString())
+
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: "rifaData",
+          newValue: JSON.stringify(dataToSave),
+          url: window.location.href,
+        }),
+      )
+
+      console.log("[v0] Dados salvos com sucesso:", dataToSave)
 
       toast({
-        title: "✅ Alterações salvas com sucesso!",
-        description: `${purchases.length} compras salvas. Última atualização: ${new Date().toLocaleTimeString()}`,
+        title: "✅ Alterações salvas automaticamente!",
+        description: `${purchases.length} compras sincronizadas. ${new Date().toLocaleTimeString()}`,
       })
     } catch (error) {
       console.error("[v0] Erro ao salvar:", error)
@@ -256,6 +303,63 @@ export default function AdminPage() {
         variant: "destructive",
       })
     }
+  }
+
+  const performDraw = () => {
+    setIsDrawing(true)
+
+    // Animação do sorteio
+    let counter = 0
+    const drawInterval = setInterval(() => {
+      const randomNum = Math.floor(Math.random() * 200) + 1
+      setDrawnNumber(randomNum)
+      counter++
+
+      if (counter >= 20) {
+        // 20 iterações para criar suspense
+        clearInterval(drawInterval)
+        const finalNumber = Math.floor(Math.random() * 200) + 1
+        setDrawnNumber(finalNumber)
+
+        // Adicionar ao histórico
+        const newDraw = {
+          number: finalNumber,
+          date: new Date().toISOString(),
+        }
+        setDrawHistory((prev) => [newDraw, ...prev])
+
+        setIsDrawing(false)
+
+        // Verificar se o número sorteado foi vendido
+        const winner = purchases.find((p) => p.status === "confirmed" && p.numbers.includes(finalNumber))
+
+        if (winner) {
+          toast({
+            title: "🎉 Temos um vencedor!",
+            description: `Número ${finalNumber.toString().padStart(3, "0")} - ${winner.customerName}`,
+          })
+        } else {
+          toast({
+            title: "🎲 Número sorteado!",
+            description: `Número ${finalNumber.toString().padStart(3, "0")} - Não vendido`,
+          })
+        }
+
+        // Salvar automaticamente
+        setTimeout(() => {
+          saveAllChanges()
+        }, 1000)
+      }
+    }, 100)
+  }
+
+  const clearDraw = () => {
+    setDrawnNumber(null)
+    localStorage.removeItem("rifaDrawnNumber")
+    toast({
+      title: "Sorteio limpo",
+      description: "O número sorteado foi removido.",
+    })
   }
 
   const getStatusColor = (status: string) => {
@@ -328,7 +432,7 @@ export default function AdminPage() {
               </Button>
               <Button
                 variant="outline"
-                onClick={handleLogout}
+                onClick={() => setIsAuthenticated(false)}
                 className="border-red-300 text-red-700 hover:bg-red-50 bg-transparent"
               >
                 <LogOut className="h-4 w-4 mr-2" />
@@ -346,6 +450,15 @@ export default function AdminPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-8">
+        {lastSyncTime && (
+          <div className="mb-4 p-3 bg-pink-50 border border-pink-200 rounded-lg">
+            <p className="text-sm text-pink-700 flex items-center gap-2">
+              <Wifi className="h-4 w-4 text-green-500" />
+              Sistema sincronizado em tempo real • Última atualização: {lastSyncTime}
+            </p>
+          </div>
+        )}
+
         {/* Cards de Estatísticas */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
           <Card className="bg-white border-pink-200 shadow-lg hover:shadow-xl transition-shadow">
@@ -391,6 +504,9 @@ export default function AdminPage() {
             </TabsTrigger>
             <TabsTrigger value="numbers" className="data-[state=active]:bg-rose-100 data-[state=active]:text-rose-800">
               🔢 Números
+            </TabsTrigger>
+            <TabsTrigger value="draw" className="data-[state=active]:bg-pink-100 data-[state=active]:text-pink-800">
+              🎲 Sorteio
             </TabsTrigger>
           </TabsList>
 
@@ -520,7 +636,7 @@ export default function AdminPage() {
                     <span>Pendente ⏳</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 bg-pink-50 border border-pink-200 rounded"></div>
+                    <div className="w-4 h-4 bg-pink-50 text-pink-700 border border-pink-200 rounded"></div>
                     <span>Disponível ✨</span>
                   </div>
                 </div>
@@ -550,6 +666,133 @@ export default function AdminPage() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="draw">
+            <div className="space-y-6">
+              {/* Card principal do sorteio */}
+              <Card className="bg-white border-pink-200 shadow-lg">
+                <CardHeader className="text-center">
+                  <CardTitle className="text-pink-800 flex items-center justify-center gap-2 text-3xl">
+                    🎲 Sorteio da Rifa 🎉
+                  </CardTitle>
+                  <CardDescription>Realize o sorteio do número vencedor</CardDescription>
+                </CardHeader>
+                <CardContent className="text-center space-y-6">
+                  {/* Número sorteado */}
+                  <div className="bg-gradient-to-br from-pink-50 to-rose-100 rounded-2xl p-8 border-2 border-pink-200">
+                    {drawnNumber !== null ? (
+                      <div className="space-y-4">
+                        <h3 className="text-lg font-semibold text-pink-800">🏆 Número Sorteado:</h3>
+                        <div
+                          className={`text-8xl font-bold bg-gradient-to-r from-pink-600 to-rose-600 bg-clip-text text-transparent ${isDrawing ? "animate-pulse" : ""}`}
+                        >
+                          {drawnNumber.toString().padStart(3, "0")}
+                        </div>
+                        {!isDrawing && (
+                          <div className="mt-4">
+                            {(() => {
+                              const winner = purchases.find(
+                                (p) => p.status === "confirmed" && p.numbers.includes(drawnNumber),
+                              )
+                              return winner ? (
+                                <div className="bg-gradient-to-r from-pink-500 to-rose-500 text-white p-4 rounded-lg">
+                                  <p className="text-xl font-bold">🎉 VENCEDOR!</p>
+                                  <p className="text-lg">{winner.customerName}</p>
+                                  <p className="text-sm opacity-90">{winner.customerPhone}</p>
+                                </div>
+                              ) : (
+                                <div className="bg-gray-100 text-gray-700 p-4 rounded-lg">
+                                  <p className="text-lg">Número não vendido</p>
+                                </div>
+                              )
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <Baby className="h-16 w-16 text-pink-400 mx-auto" />
+                        <p className="text-xl text-pink-600">Pronto para o sorteio! 💕</p>
+                        <p className="text-pink-500">Clique no botão abaixo para sortear o número vencedor</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Botões de ação */}
+                  <div className="flex justify-center gap-4">
+                    <Button
+                      onClick={performDraw}
+                      disabled={isDrawing}
+                      className="bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 text-white px-8 py-3 text-lg shadow-lg"
+                    >
+                      {isDrawing ? (
+                        <>
+                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                          Sorteando...
+                        </>
+                      ) : (
+                        <>🎲 Realizar Sorteio</>
+                      )}
+                    </Button>
+
+                    {drawnNumber !== null && !isDrawing && (
+                      <Button
+                        onClick={clearDraw}
+                        variant="outline"
+                        className="border-pink-300 text-pink-700 hover:bg-pink-50 px-6 py-3 bg-transparent"
+                      >
+                        🗑️ Limpar Sorteio
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Histórico de sorteios */}
+              {drawHistory.length > 0 && (
+                <Card className="bg-white border-rose-200 shadow-lg">
+                  <CardHeader>
+                    <CardTitle className="text-rose-800 flex items-center gap-2">📋 Histórico de Sorteios</CardTitle>
+                    <CardDescription>Últimos sorteios realizados</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {drawHistory.slice(0, 10).map((draw, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between p-3 bg-pink-50 rounded-lg border border-pink-200"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="bg-gradient-to-r from-pink-500 to-rose-500 text-white rounded-full w-12 h-12 flex items-center justify-center font-bold">
+                              {draw.number.toString().padStart(3, "0")}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-pink-800">Número {draw.number}</p>
+                              <p className="text-sm text-pink-600">{new Date(draw.date).toLocaleString("pt-BR")}</p>
+                            </div>
+                          </div>
+                          {(() => {
+                            const winner = purchases.find(
+                              (p) => p.status === "confirmed" && p.numbers.includes(draw.number),
+                            )
+                            return winner ? (
+                              <Badge className="bg-gradient-to-r from-pink-500 to-rose-500 text-white">
+                                🏆 {winner.customerName}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="border-gray-300 text-gray-600">
+                                Não vendido
+                              </Badge>
+                            )
+                          })()}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           </TabsContent>
         </Tabs>
       </main>
