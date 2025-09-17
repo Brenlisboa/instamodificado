@@ -15,7 +15,7 @@ export default function RifaPage() {
   const [isOnline, setIsOnline] = useState(true)
 
   const totalNumbers = 200
-  const pricePerNumber = 5.0
+  const pricePerNumber = 1.0 // Alterando preço por número de 5.0 para 1.0
   const prize = 400
   const availableNumbers = totalNumbers - soldNumbers.length - pendingNumbers.length
 

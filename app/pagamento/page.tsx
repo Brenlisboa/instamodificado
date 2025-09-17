@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { QrCode, Copy, CheckCircle, ArrowLeft, Baby, Heart, Star } from "lucide-react"
+import { CheckCircle, ArrowLeft, Baby, Heart, Star, MessageCircle, Copy, QrCode } from "lucide-react"
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
 
@@ -18,7 +18,9 @@ export default function PagamentoPage() {
   const [customerName, setCustomerName] = useState("")
   const [customerPhone, setCustomerPhone] = useState("")
   const [paymentConfirmed, setPaymentConfirmed] = useState(false)
-  const [qrCodeDataUrl, setQrCodeDataUrl] = useState("")
+  const [pixCode, setPixCode] = useState("")
+  const [qrCodeUrl, setQrCodeUrl] = useState("")
+  const [showPayment, setShowPayment] = useState(false)
 
   const numerosParam = searchParams.get("numeros")
   const totalParam = searchParams.get("total")
@@ -26,103 +28,57 @@ export default function PagamentoPage() {
   const selectedNumbers = numerosParam ? numerosParam.split(",").map(Number) : []
   const total = totalParam ? Number.parseFloat(totalParam) : 0
 
-  const pixCode =
-    "00020126360014BR.GOV.BCB.PIX0114+55759998591315204000053039865802BR5901N6001C62210517ChadefraldadaMalu63047C5A"
-  const chavePix = "+5575999859131"
+  const generatePixCode = (value: number, customerName: string) => {
+    const pixKey = "brennolisboa8812@gmail.com" // Chave PIX real fornecida pelo usuário
+    const merchantName = "RIFA DA MALU"
+    const merchantCity = "SAO PAULO"
+    const txId = Date.now().toString().slice(-10) // ID único da transação
 
-  useEffect(() => {
-    const generateQRCode = async () => {
-      try {
-        const canvas = document.createElement("canvas")
-        const ctx = canvas.getContext("2d")
-        const size = 200
-        canvas.width = size
-        canvas.height = size
+    const merchantAccountInfo = `0014br.gov.bcb.pix01${pixKey.length.toString().padStart(2, "0")}${pixKey}`
 
-        ctx!.fillStyle = "#ffffff"
-        ctx!.fillRect(0, 0, size, size)
+    // Construindo payload EMV
+    let payload = ""
+    payload += "000201" // Payload Format Indicator
+    payload += "010212" // Point of Initiation Method (12 = QR Code estático reutilizável)
+    payload += `26${merchantAccountInfo.length.toString().padStart(2, "0")}${merchantAccountInfo}` // Merchant Account Information
+    payload += "52040000" // Merchant Category Code
+    payload += "5303986" // Transaction Currency (986 = BRL)
+    payload += `54${value.toFixed(2).length.toString().padStart(2, "0")}${value.toFixed(2)}` // Transaction Amount
+    payload += "5802BR" // Country Code
+    payload += `59${merchantName.length.toString().padStart(2, "0")}${merchantName}` // Merchant Name
+    payload += `60${merchantCity.length.toString().padStart(2, "0")}${merchantCity}` // Merchant City
 
-        const modules = 25
-        const moduleSize = size / modules
+    // Additional Data Field Template (tag 62)
+    const additionalData = `05${txId.length.toString().padStart(2, "0")}${txId}`
+    payload += `62${additionalData.length.toString().padStart(2, "0")}${additionalData}`
 
-        for (let i = 0; i < modules; i++) {
-          for (let j = 0; j < modules; j++) {
-            const hash = pixCode.charCodeAt((i * modules + j) % pixCode.length)
-            if (hash % 2 === 0) {
-              ctx!.fillStyle = "#000000"
-              ctx!.fillRect(i * moduleSize, j * moduleSize, moduleSize, moduleSize)
-            }
-          }
+    payload += "6304" // CRC16 placeholder
+
+    // Calcular CRC16
+    const crc16 = calculateCRC16(payload)
+    return payload + crc16
+  }
+
+  const calculateCRC16 = (payload: string) => {
+    const polynomial = 0x1021
+    let crc = 0xffff
+
+    for (let i = 0; i < payload.length; i++) {
+      crc ^= payload.charCodeAt(i) << 8
+      for (let j = 0; j < 8; j++) {
+        if (crc & 0x8000) {
+          crc = (crc << 1) ^ polynomial
+        } else {
+          crc <<= 1
         }
-
-        const cornerSize = moduleSize * 7
-        ctx!.fillStyle = "#000000"
-        ctx!.fillRect(0, 0, cornerSize, cornerSize)
-        ctx!.fillStyle = "#ffffff"
-        ctx!.fillRect(moduleSize, moduleSize, cornerSize - 2 * moduleSize, cornerSize - 2 * moduleSize)
-        ctx!.fillStyle = "#000000"
-        ctx!.fillRect(2 * moduleSize, 2 * moduleSize, cornerSize - 4 * moduleSize, cornerSize - 4 * moduleSize)
-
-        ctx!.fillStyle = "#000000"
-        ctx!.fillRect(size - cornerSize, 0, cornerSize, cornerSize)
-        ctx!.fillStyle = "#ffffff"
-        ctx!.fillRect(
-          size - cornerSize + moduleSize,
-          moduleSize,
-          cornerSize - 2 * moduleSize,
-          cornerSize - 2 * moduleSize,
-        )
-        ctx!.fillStyle = "#000000"
-        ctx!.fillRect(
-          size - cornerSize + 2 * moduleSize,
-          2 * moduleSize,
-          cornerSize - 4 * moduleSize,
-          cornerSize - 4 * moduleSize,
-        )
-
-        ctx!.fillStyle = "#000000"
-        ctx!.fillRect(0, size - cornerSize, cornerSize, cornerSize)
-        ctx!.fillStyle = "#ffffff"
-        ctx!.fillRect(
-          moduleSize,
-          size - cornerSize + moduleSize,
-          cornerSize - 2 * moduleSize,
-          cornerSize - 2 * moduleSize,
-        )
-        ctx!.fillStyle = "#000000"
-        ctx!.fillRect(
-          2 * moduleSize,
-          size - cornerSize + 2 * moduleSize,
-          cornerSize - 4 * moduleSize,
-          cornerSize - 4 * moduleSize,
-        )
-
-        setQrCodeDataUrl(canvas.toDataURL())
-      } catch (error) {
-        console.error("Erro ao gerar QR code:", error)
+        crc &= 0xffff
       }
     }
 
-    generateQRCode()
-  }, [])
-
-  const copyPixKey = () => {
-    navigator.clipboard.writeText(chavePix)
-    toast({
-      title: "Chave PIX copiada!",
-      description: "A chave PIX foi copiada para sua área de transferência.",
-    })
+    return crc.toString(16).toUpperCase().padStart(4, "0")
   }
 
-  const copyPixCode = () => {
-    navigator.clipboard.writeText(pixCode)
-    toast({
-      title: "Código PIX copiado!",
-      description: "O código PIX foi copiado para sua área de transferência.",
-    })
-  }
-
-  const handleConfirmPayment = () => {
+  const gerarPagamentoPix = () => {
     if (!customerName.trim() || !customerPhone.trim()) {
       toast({
         title: "Dados incompletos",
@@ -132,12 +88,88 @@ export default function PagamentoPage() {
       return
     }
 
-    setPaymentConfirmed(true)
+    const pixCodeGenerated = generatePixCode(total, customerName)
+    setPixCode(pixCodeGenerated)
+
+    // Gerar QR Code usando API externa
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(pixCodeGenerated)}&format=png&margin=10`
+    setQrCodeUrl(qrUrl)
+    setShowPayment(true)
+
     toast({
-      title: "Pagamento confirmado!",
-      description: "Seus números foram reservados. Aguarde a confirmação do pagamento.",
+      title: "PIX gerado com sucesso!",
+      description: "Escaneie o QR Code ou copie o código PIX.",
     })
   }
+
+  const copyPixCode = () => {
+    navigator.clipboard.writeText(pixCode)
+    toast({
+      title: "Código PIX copiado!",
+      description: "Cole no seu app bancário para pagar.",
+    })
+  }
+
+  const confirmarPagamento = () => {
+    // Salvar dados no localStorage
+    const purchaseData = {
+      customerName,
+      customerPhone,
+      selectedNumbers,
+      total,
+      timestamp: new Date().toISOString(),
+      status: "pending",
+    }
+
+    const existingData = JSON.parse(
+      localStorage.getItem("rifaData") || '{"purchases": [], "pendingNumbers": [], "soldNumbers": []}',
+    )
+    existingData.purchases.push(purchaseData)
+    existingData.pendingNumbers.push(...selectedNumbers)
+    localStorage.setItem("rifaData", JSON.stringify(existingData))
+
+    const whatsappNumber = "5575999859131"
+    const message = `Olá! Acabei de fazer meu pedido na Rifa do Chá de Fralda da Malu 💕👶
+
+📝 *Dados do pedido:*
+• Nome: ${customerName}
+• Telefone: ${customerPhone}
+• Números: ${selectedNumbers.map((n) => n.toString().padStart(3, "0")).join(", ")}
+• Total: R$ ${total.toFixed(2)}
+
+💳 Já realizei o pagamento via PIX e gostaria de enviar o comprovante!
+
+Obrigado(a)! 🎉`
+
+    const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
+
+    // Abrir WhatsApp em nova aba
+    window.open(whatsappUrl, "_blank")
+
+    // Ainda mostrar a tela de confirmação
+    setPaymentConfirmed(true)
+  }
+
+  useEffect(() => {
+    const success = searchParams.get("success")
+    const failure = searchParams.get("failure")
+    const pending = searchParams.get("pending")
+
+    if (success === "true") {
+      setPaymentConfirmed(true)
+    } else if (failure === "true") {
+      toast({
+        title: "Pagamento não aprovado",
+        description: "Tente novamente ou escolha outra forma de pagamento.",
+        variant: "destructive",
+      })
+    } else if (pending === "true") {
+      toast({
+        title: "Pagamento pendente",
+        description: "Seu pagamento está sendo processado.",
+      })
+    }
+  }, [searchParams, toast])
 
   if (selectedNumbers.length === 0) {
     return (
@@ -186,9 +218,18 @@ export default function PagamentoPage() {
             <CardContent className="p-8 text-center">
               <CheckCircle className="h-16 w-16 text-pink-600 mx-auto mb-4" />
               <h2 className="text-2xl font-bold text-pink-800 mb-4">Pedido Confirmado! 🎉</h2>
-              <p className="text-pink-600 mb-6">
-                Obrigado, {customerName}! Seus números foram reservados e aguardam a confirmação do pagamento. 💕
-              </p>
+
+              <div className="bg-gradient-to-br from-pink-50 to-rose-50 p-6 rounded-lg mb-6 border border-pink-200">
+                <p className="text-pink-700 mb-4 text-lg font-medium">
+                  Muito obrigada por participar da rifa do chá de fralda da Malu! 💕
+                </p>
+                <p className="text-pink-600 mb-4">
+                  Sua participação é muito especial para nós e ajudará a tornar este momento ainda mais especial. 👶✨
+                </p>
+                <p className="text-pink-600 mb-4">
+                  Obrigado, {customerName}! Seus números foram reservados e aguardam a confirmação do pagamento.
+                </p>
+              </div>
 
               <div className="bg-gradient-to-br from-pink-50 to-rose-50 p-4 rounded-lg mb-6 border border-pink-200">
                 <h3 className="font-semibold text-pink-800 mb-2 flex items-center justify-center gap-1">
@@ -209,6 +250,27 @@ export default function PagamentoPage() {
                 <Baby className="h-4 w-4" />
                 Entraremos em contato pelo telefone {customerPhone} assim que o pagamento for confirmado. 📞
               </p>
+
+              <div className="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-lg mb-6 border border-green-200">
+                <h4 className="font-semibold text-green-800 mb-2 flex items-center justify-center gap-1">
+                  <MessageCircle className="h-4 w-4" />
+                  Dúvidas? Entre em contato! 💬
+                </h4>
+                <p className="text-green-700 text-sm mb-3">
+                  Se tiver alguma dúvida sobre a rifa ou o pagamento, entre no nosso grupo do WhatsApp:
+                </p>
+                <a
+                  href="https://chat.whatsapp.com/KEtZjwkOsvi1MixDwH8iGu?mode=ems_copy_t"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block"
+                >
+                  <Button className="bg-green-500 hover:bg-green-600 text-white">
+                    <MessageCircle className="h-4 w-4 mr-2" />
+                    Entrar no Grupo WhatsApp
+                  </Button>
+                </a>
+              </div>
 
               <Link href="/">
                 <Button className="bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 shadow-lg">
@@ -285,7 +347,7 @@ export default function PagamentoPage() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span>Valor unitário:</span>
-                  <span>R$ 5,00</span>
+                  <span>R$ 1,00</span>
                 </div>
                 <div className="flex justify-between font-bold text-lg text-pink-800 mt-2">
                   <span>Total:</span>
@@ -330,84 +392,80 @@ export default function PagamentoPage() {
             <CardHeader>
               <CardTitle className="text-pink-800 flex items-center gap-2">
                 <QrCode className="h-5 w-5" />
-                Pagamento via PIX 💳
+                Pagamento PIX 💳
               </CardTitle>
-              <CardDescription>Escaneie o QR Code ou copie a chave PIX</CardDescription>
+              <CardDescription>Pague instantaneamente via PIX</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="text-center">
-                <div className="bg-white p-4 rounded-lg border-2 border-pink-200 inline-block shadow-lg">
-                  {qrCodeDataUrl ? (
-                    <img src={qrCodeDataUrl || "/placeholder.svg"} alt="QR Code PIX" className="w-48 h-48 rounded-lg" />
-                  ) : (
-                    <div className="w-48 h-48 bg-pink-50 rounded-lg flex items-center justify-center">
-                      <QrCode className="h-32 w-32 text-pink-400" />
+              {!showPayment ? (
+                <>
+                  <div className="bg-gradient-to-br from-pink-50 to-rose-50 p-4 rounded-lg border border-pink-200">
+                    <h4 className="font-medium text-pink-800 mb-2 flex items-center justify-center gap-1">
+                      <Baby className="h-4 w-4" />
+                      Como funciona: 👶
+                    </h4>
+                    <ol className="text-sm text-pink-700 space-y-1">
+                      <li>1. 📝 Preencha seus dados ao lado</li>
+                      <li>2. 💳 Clique em "Gerar PIX"</li>
+                      <li>3. 📱 Escaneie o QR Code ou copie o código</li>
+                      <li>4. ✅ Pague no seu app bancário</li>
+                      <li>5. 🎉 Confirme o pagamento aqui</li>
+                    </ol>
+                  </div>
+
+                  <Button
+                    onClick={gerarPagamentoPix}
+                    className="w-full bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 shadow-lg"
+                    disabled={!customerName.trim() || !customerPhone.trim()}
+                  >
+                    <QrCode className="h-4 w-4 mr-2" />💕 Gerar PIX - R$ {total.toFixed(2)}
+                  </Button>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  {/* QR Code */}
+                  <div className="text-center">
+                    <div className="bg-white p-4 rounded-lg border-2 border-pink-200 inline-block">
+                      <img src={qrCodeUrl || "/placeholder.svg"} alt="QR Code PIX" className="w-48 h-48 mx-auto" />
                     </div>
-                  )}
-                </div>
-                <p className="text-sm text-pink-600 mt-2 flex items-center justify-center gap-1">
-                  <Baby className="h-4 w-4" />
-                  Escaneie com o app do seu banco 📱
-                </p>
-              </div>
+                    <p className="text-sm text-pink-600 mt-2">📱 Escaneie com seu app bancário</p>
+                  </div>
 
-              <div>
-                <Label className="text-pink-800 flex items-center gap-1">
-                  <Heart className="h-4 w-4" />
-                  Chave PIX (Telefone): 📞
-                </Label>
-                <div className="flex gap-2 mt-1">
-                  <Input value={chavePix} readOnly className="border-pink-200 bg-pink-50" />
+                  {/* Código PIX */}
+                  <div className="space-y-2">
+                    <Label>Ou copie o código PIX:</Label>
+                    <div className="flex gap-2">
+                      <Input value={pixCode} readOnly className="font-mono text-xs border-pink-200" />
+                      <Button
+                        onClick={copyPixCode}
+                        variant="outline"
+                        className="border-pink-300 text-pink-700 hover:bg-pink-50 bg-transparent"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Valor */}
+                  <div className="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-lg border border-green-200 text-center">
+                    <p className="text-green-800 font-bold text-xl">💰 R$ {total.toFixed(2)}</p>
+                    <p className="text-green-600 text-sm">Valor será debitado automaticamente</p>
+                  </div>
+
+                  {/* Botão de confirmação */}
                   <Button
-                    onClick={copyPixKey}
-                    variant="outline"
-                    size="icon"
-                    className="border-pink-300 text-pink-700 hover:bg-pink-50 bg-transparent"
+                    onClick={confirmarPagamento}
+                    className="w-full bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700"
                   >
-                    <Copy className="h-4 w-4" />
+                    <CheckCircle className="h-4 w-4 mr-2" />✅ Já paguei - Confirmar Pedido
                   </Button>
+
+                  <div className="text-center text-xs text-pink-600">
+                    <p>🔒 PIX instantâneo e seguro</p>
+                    <p>💳 Funciona 24h por dia, 7 dias por semana</p>
+                  </div>
                 </div>
-              </div>
-
-              <div>
-                <Label className="text-pink-800 flex items-center gap-1">
-                  <Star className="h-4 w-4" />
-                  Código PIX (Copia e Cola): 📋
-                </Label>
-                <div className="flex gap-2 mt-1">
-                  <Input value={pixCode} readOnly className="border-pink-200 bg-pink-50 text-xs" />
-                  <Button
-                    onClick={copyPixCode}
-                    variant="outline"
-                    size="icon"
-                    className="border-pink-300 text-pink-700 hover:bg-pink-50 bg-transparent"
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="bg-gradient-to-br from-pink-50 to-rose-50 p-4 rounded-lg border border-pink-200">
-                <h4 className="font-medium text-pink-800 mb-2 flex items-center gap-1">
-                  <Baby className="h-4 w-4" />
-                  Instruções: 👶
-                </h4>
-                <ol className="text-sm text-pink-700 space-y-1">
-                  <li>1. 📱 Abra o app do seu banco</li>
-                  <li>2. 💳 Escolha a opção PIX</li>
-                  <li>3. 📷 Escaneie o QR Code ou cole o código</li>
-                  <li>4. 💰 Confirme o pagamento de R$ {total.toFixed(2)}</li>
-                  <li>5. ✅ Clique em "Confirmar Pagamento" abaixo</li>
-                </ol>
-              </div>
-
-              <Button
-                onClick={handleConfirmPayment}
-                className="w-full bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-600 hover:to-rose-600 shadow-lg"
-                disabled={!customerName.trim() || !customerPhone.trim()}
-              >
-                <CheckCircle className="h-4 w-4 mr-2" />💕 Confirmar Pagamento
-              </Button>
+              )}
             </CardContent>
           </Card>
         </div>

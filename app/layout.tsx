@@ -8,7 +8,7 @@ import "./globals.css"
 
 export const metadata: Metadata = {
   title: "Rifa Chá de Fralda da Malu",
-  description: "Participe da rifa do chá de fralda da Malu! 200 números disponíveis por apenas R$ 5,00 cada.",
+  description: "Participe da rifa do chá de fralda da Malu! 200 números disponíveis por apenas R$ 1,00 cada.",
   generator: "v0.app",
 }
 

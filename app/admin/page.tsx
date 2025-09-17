@@ -44,16 +44,29 @@ function LoginForm({ onLogin }: { onLogin: () => void }) {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
+    setError("")
 
-    if (username === "Malu" && password === "Mj1805") {
+    const trimmedUsername = username.trim()
+    const trimmedPassword = password.trim()
+
+    console.log("[v0] Tentativa de login - Usuário:", trimmedUsername)
+    console.log("[v0] Tentativa de login - Senha:", trimmedPassword)
+    console.log("[v0] Verificação - Usuário correto:", trimmedUsername === "Malu")
+    console.log("[v0] Verificação - Senha correta:", trimmedPassword === "Mj1805")
+
+    if (trimmedUsername === "Malu" && trimmedPassword === "Mj1805") {
+      console.log("[v0] Login bem-sucedido, salvando no localStorage")
       localStorage.setItem("adminAuth", "true")
+      console.log("[v0] AdminAuth salvo:", localStorage.getItem("adminAuth"))
       onLogin()
       toast({
         title: "Login realizado com sucesso!",
         description: "Bem-vinda à área administrativa.",
       })
     } else {
+      console.log("[v0] Login falhou - credenciais incorretas")
       setError("Usuário ou senha incorretos")
+      setPassword("") // Limpar senha em caso de erro
       toast({
         title: "Erro no login",
         description: "Usuário ou senha incorretos.",
@@ -127,52 +140,27 @@ export default function AdminPage() {
   const [drawnNumber, setDrawnNumber] = useState<number | null>(null)
   const [isDrawing, setIsDrawing] = useState(false)
   const [drawHistory, setDrawHistory] = useState<Array<{ number: number; date: string }>>([])
-  const [purchases, setPurchases] = useState<Purchase[]>([
-    {
-      id: "1",
-      customerName: "Maria Silva",
-      customerPhone: "(11) 99999-1111",
-      numbers: [1, 5, 12],
-      total: 15.0,
-      status: "confirmed",
-      createdAt: "2024-01-15T10:30:00Z",
-    },
-    {
-      id: "2",
-      customerName: "João Santos",
-      customerPhone: "(11) 99999-2222",
-      numbers: [23, 45, 67, 89],
-      total: 20.0,
-      status: "pending",
-      createdAt: "2024-01-15T14:20:00Z",
-    },
-    {
-      id: "3",
-      customerName: "Ana Costa",
-      customerPhone: "(11) 99999-3333",
-      numbers: [100, 134],
-      total: 10.0,
-      status: "confirmed",
-      createdAt: "2024-01-15T16:45:00Z",
-    },
-    {
-      id: "4",
-      customerName: "Pedro Oliveira",
-      customerPhone: "(11) 99999-4444",
-      numbers: [156, 178, 199],
-      total: 15.0,
-      status: "pending",
-      createdAt: "2024-01-15T18:10:00Z",
-    },
-  ])
+  const [purchases, setPurchases] = useState<Purchase[]>([])
 
   const loadSavedData = useCallback(() => {
     try {
-      const savedPurchases = localStorage.getItem("rifaPurchases")
-      if (savedPurchases) {
-        const parsedPurchases = JSON.parse(savedPurchases)
-        setPurchases(parsedPurchases)
-        console.log("[v0] Dados carregados:", parsedPurchases.length, "compras")
+      const savedData = localStorage.getItem("rifaData")
+      if (savedData) {
+        const parsedData = JSON.parse(savedData)
+        console.log("[v0] Dados carregados:", parsedData.purchases?.length || 0, "compras")
+
+        if (parsedData.purchases && Array.isArray(parsedData.purchases)) {
+          const convertedPurchases = parsedData.purchases.map((purchase: any, index: number) => ({
+            id: purchase.id || (index + 1).toString(),
+            customerName: purchase.customerName,
+            customerPhone: purchase.customerPhone,
+            numbers: purchase.selectedNumbers || purchase.numbers || [],
+            total: purchase.total,
+            status: purchase.status,
+            createdAt: purchase.timestamp || purchase.createdAt || new Date().toISOString(),
+          }))
+          setPurchases(convertedPurchases)
+        }
       }
 
       const savedDrawnNumber = localStorage.getItem("rifaDrawnNumber")
@@ -195,28 +183,45 @@ export default function AdminPage() {
   }, [])
 
   useEffect(() => {
-    const authStatus = localStorage.getItem("adminAuth")
-    setIsAuthenticated(authStatus === "true")
+    const checkAuth = () => {
+      const authStatus = localStorage.getItem("adminAuth")
+      console.log("[v0] Verificando autenticação - Status no localStorage:", authStatus)
+      console.log("[v0] Verificando autenticação - Resultado:", authStatus === "true")
+      setIsAuthenticated(authStatus === "true")
+    }
 
+    checkAuth()
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "adminAuth") {
+        console.log("[v0] Storage change detectado para adminAuth:", e.newValue)
+        checkAuth()
+      } else if (e.key === "rifaData") {
+        loadSavedData()
+      }
+    }
+
+    window.addEventListener("storage", handleStorageChange)
     loadSavedData()
     setIsLoading(false)
+
+    return () => {
+      window.removeEventListener("storage", handleStorageChange)
+    }
   }, [loadSavedData])
 
   useEffect(() => {
-    if (purchases.length > 0) {
-      const timeoutId = setTimeout(() => {
-        saveAllChanges()
-      }, 2000) // Auto-save após 2 segundos de inatividade
+    const interval = setInterval(() => {
+      loadSavedData()
+    }, 5000)
 
-      return () => clearTimeout(timeoutId)
-    }
-  }, [purchases])
+    return () => clearInterval(interval)
+  }, [loadSavedData])
 
   const totalNumbers = 200
-  const pricePerNumber = 5.0
+  const pricePerNumber = 1.0
   const prize = 400
 
-  // Calcular estatísticas
   const soldNumbers = purchases.filter((p) => p.status === "confirmed").flatMap((p) => p.numbers)
 
   const pendingNumbers = purchases.filter((p) => p.status === "pending").flatMap((p) => p.numbers)
@@ -253,7 +258,14 @@ export default function AdminPage() {
     try {
       const timestamp = new Date().toISOString()
       const dataToSave = {
-        purchases: purchases,
+        purchases: purchases.map((p) => ({
+          customerName: p.customerName,
+          customerPhone: p.customerPhone,
+          selectedNumbers: p.numbers,
+          total: p.total,
+          timestamp: p.createdAt,
+          status: p.status,
+        })),
         lastSaved: timestamp,
         totalSold: totalSold,
         totalRevenue: totalRevenue,
@@ -264,15 +276,10 @@ export default function AdminPage() {
         version: Date.now(),
       }
 
-      // Backup dos dados anteriores
-      const previousData = localStorage.getItem("rifaData")
-      if (previousData) {
-        localStorage.setItem("rifaDataBackup", previousData)
-      }
+      const existingData = JSON.parse(localStorage.getItem("rifaData") || "{}")
+      const mergedData = { ...existingData, ...dataToSave }
 
-      // Salvar novos dados
-      localStorage.setItem("rifaPurchases", JSON.stringify(purchases))
-      localStorage.setItem("rifaData", JSON.stringify(dataToSave))
+      localStorage.setItem("rifaData", JSON.stringify(mergedData))
       localStorage.setItem("rifaLastSaved", timestamp)
       if (drawnNumber !== null) {
         localStorage.setItem("rifaDrawnNumber", drawnNumber.toString())
@@ -284,12 +291,12 @@ export default function AdminPage() {
       window.dispatchEvent(
         new StorageEvent("storage", {
           key: "rifaData",
-          newValue: JSON.stringify(dataToSave),
+          newValue: JSON.stringify(mergedData),
           url: window.location.href,
         }),
       )
 
-      console.log("[v0] Dados salvos com sucesso:", dataToSave)
+      console.log("[v0] Dados salvos com sucesso:", mergedData)
 
       toast({
         title: "✅ Alterações salvas automaticamente!",
@@ -308,7 +315,6 @@ export default function AdminPage() {
   const performDraw = () => {
     setIsDrawing(true)
 
-    // Animação do sorteio
     let counter = 0
     const drawInterval = setInterval(() => {
       const randomNum = Math.floor(Math.random() * 200) + 1
@@ -316,12 +322,10 @@ export default function AdminPage() {
       counter++
 
       if (counter >= 20) {
-        // 20 iterações para criar suspense
         clearInterval(drawInterval)
         const finalNumber = Math.floor(Math.random() * 200) + 1
         setDrawnNumber(finalNumber)
 
-        // Adicionar ao histórico
         const newDraw = {
           number: finalNumber,
           date: new Date().toISOString(),
@@ -330,7 +334,6 @@ export default function AdminPage() {
 
         setIsDrawing(false)
 
-        // Verificar se o número sorteado foi vendido
         const winner = purchases.find((p) => p.status === "confirmed" && p.numbers.includes(finalNumber))
 
         if (winner) {
@@ -345,7 +348,6 @@ export default function AdminPage() {
           })
         }
 
-        // Salvar automaticamente
         setTimeout(() => {
           saveAllChanges()
         }, 1000)
@@ -388,6 +390,15 @@ export default function AdminPage() {
     }
   }
 
+  const handleLogout = () => {
+    localStorage.removeItem("adminAuth")
+    setIsAuthenticated(false)
+    toast({
+      title: "Logout realizado",
+      description: "Você foi desconectado da área administrativa.",
+    })
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-pink-50 via-pink-100 to-rose-100 flex items-center justify-center">
@@ -405,7 +416,6 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-pink-100 to-rose-100">
-      {/* Header */}
       <header className="bg-white shadow-sm border-b border-pink-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="flex items-center justify-between">
@@ -432,7 +442,7 @@ export default function AdminPage() {
               </Button>
               <Button
                 variant="outline"
-                onClick={() => setIsAuthenticated(false)}
+                onClick={handleLogout}
                 className="border-red-300 text-red-700 hover:bg-red-50 bg-transparent"
               >
                 <LogOut className="h-4 w-4 mr-2" />
@@ -459,7 +469,6 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* Cards de Estatísticas */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
           <Card className="bg-white border-pink-200 shadow-lg hover:shadow-xl transition-shadow">
             <CardContent className="p-4 text-center">
@@ -510,14 +519,13 @@ export default function AdminPage() {
             </TabsTrigger>
           </TabsList>
 
-          {/* Aba de Compras */}
           <TabsContent value="purchases">
             <Card className="bg-white border-pink-200 shadow-lg">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="text-pink-800 flex items-center gap-2">
-                      <Heart className="h-5 w-5" />
+                      <Baby className="h-4 w-4" />
                       Gerenciar Compras 👶
                     </CardTitle>
                     <CardDescription>Visualize e gerencie todas as compras da rifa</CardDescription>
@@ -615,7 +623,6 @@ export default function AdminPage() {
             </Card>
           </TabsContent>
 
-          {/* Aba de Números */}
           <TabsContent value="numbers">
             <Card className="bg-white border-rose-200 shadow-lg">
               <CardHeader>
@@ -636,7 +643,7 @@ export default function AdminPage() {
                     <span>Pendente ⏳</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 bg-pink-50 text-pink-700 border border-pink-200 rounded"></div>
+                    <div className="w-4 h-4 bg-pink-50 text-pink-700 border border-pink-200 hover:bg-pink-100"></div>
                     <span>Disponível ✨</span>
                   </div>
                 </div>
@@ -670,7 +677,6 @@ export default function AdminPage() {
 
           <TabsContent value="draw">
             <div className="space-y-6">
-              {/* Card principal do sorteio */}
               <Card className="bg-white border-pink-200 shadow-lg">
                 <CardHeader className="text-center">
                   <CardTitle className="text-pink-800 flex items-center justify-center gap-2 text-3xl">
@@ -679,7 +685,6 @@ export default function AdminPage() {
                   <CardDescription>Realize o sorteio do número vencedor</CardDescription>
                 </CardHeader>
                 <CardContent className="text-center space-y-6">
-                  {/* Número sorteado */}
                   <div className="bg-gradient-to-br from-pink-50 to-rose-100 rounded-2xl p-8 border-2 border-pink-200">
                     {drawnNumber !== null ? (
                       <div className="space-y-4">
@@ -719,7 +724,6 @@ export default function AdminPage() {
                     )}
                   </div>
 
-                  {/* Botões de ação */}
                   <div className="flex justify-center gap-4">
                     <Button
                       onClick={performDraw}
@@ -749,7 +753,6 @@ export default function AdminPage() {
                 </CardContent>
               </Card>
 
-              {/* Histórico de sorteios */}
               {drawHistory.length > 0 && (
                 <Card className="bg-white border-rose-200 shadow-lg">
                   <CardHeader>
